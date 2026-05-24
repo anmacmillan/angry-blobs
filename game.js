@@ -109,17 +109,23 @@ class Game {
     const speed = SHOT_SPEED * Math.max(0.15, Math.min(1, this.aim.power));
     const vx = Math.cos(this.aim.angle) * speed;
     const vy = Math.sin(this.aim.angle) * speed;
-    // Spawn at barrel tip so the projectile clears the firer's tank collision radius.
-    const muzzleOffset = TANK_W * 0.8;
-    const spawnX = tank.x + Math.cos(this.aim.angle) * muzzleOffset;
-    const spawnY = (tank.y - TANK_H) + Math.sin(this.aim.angle) * muzzleOffset;
+    // Spawn well above the tank and outside its own collision radius. Lift above terrain if curving up beside the tank.
+    const muzzleOffset = TANK_W * 0.9;
+    let spawnX = tank.x + Math.cos(this.aim.angle) * muzzleOffset;
+    let spawnY = (tank.y - TANK_H - 12) + Math.sin(this.aim.angle) * muzzleOffset;
+    const groundHere = this.groundY(spawnX);
+    if (spawnY > groundHere - 14) spawnY = groundHere - 14;
     const payload = { type: 'fire', side: this.side, x: spawnX, y: spawnY, vx, vy, wind: this.wind };
     this.send(payload);
     this.startProjectile(payload);
   }
 
   startProjectile(p) {
-    this.projectile = { x: p.x, y: p.y, vx: p.vx, vy: p.vy, wind: p.wind, trail: [] };
+    this.projectile = {
+      x: p.x, y: p.y, vx: p.vx, vy: p.vy, wind: p.wind, trail: [],
+      firerSide: p.side ?? null,
+      armed: false,                // firer's own tank is ignored until armed
+    };
     this.phase = 'flying';
   }
 
@@ -145,8 +151,14 @@ class Game {
           this.explode(p.x, this.groundY(p.x));
           return;
         }
-        for (const t of this.tanks) {
-          if (Math.hypot(p.x - t.x, p.y - (t.y - TANK_H * 0.5)) < TANK_W * 0.55) {
+        for (let ti = 0; ti < this.tanks.length; ti++) {
+          const t = this.tanks[ti];
+          const d = Math.hypot(p.x - t.x, p.y - (t.y - TANK_H * 0.5));
+          if (ti === p.firerSide && !p.armed) {
+            if (d > TANK_W * 0.9) p.armed = true;
+            continue;
+          }
+          if (d < TANK_W * 0.55) {
             this.explode(p.x, p.y);
             return;
           }
@@ -222,8 +234,11 @@ class Game {
     const dist = Math.hypot(dx, dy);
     if (dist < 8) return;
     this.drag.pulled = true;
-    this.aim.angle = Math.atan2(dy, dx);
-    this.aim.power = Math.max(0.18, Math.min(1, dist / 260));
+    let angle = Math.atan2(dy, dx);
+    // Forbid shots that point below horizontal — slingshot always launches upward.
+    if (Math.sin(angle) > 0) angle = Math.cos(angle) >= 0 ? 0 : Math.PI;
+    this.aim.angle = angle;
+    this.aim.power = Math.max(0.22, Math.min(1, dist / 260));
   }
   onPointerUp() {
     if (this.drag && this.drag.pulled && this.myTurn()) {
@@ -308,10 +323,14 @@ class Game {
         if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
       }
       ctx.stroke();
+      const px = this.worldToCanvasX(p.x);
+      const py = this.worldToCanvasY(p.y);
+      ctx.fillStyle = 'rgba(255, 212, 91, 0.35)';
+      ctx.beginPath(); ctx.arc(px, py, 18, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#ffd45b';
-      ctx.beginPath();
-      ctx.arc(this.worldToCanvasX(p.x), this.worldToCanvasY(p.y), 5, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(px, py, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(px - 2, py - 2, 3, 0, Math.PI * 2); ctx.fill();
     }
   }
 
