@@ -15,6 +15,48 @@ const ROUND_RESET_MS = 2600;
 
 const SLING_A = { x: 260, y: GROUND_Y - 128 };
 const SLING_B = { x: WORLD_W - 260, y: GROUND_Y - 128 };
+const WORLD_THEMES = [
+  {
+    name: 'MEADOW',
+    sky: ['#6bc7ff', '#9ee7ff', '#ffd77d', '#ff9966'],
+    ground: '#90cf4f',
+    turf: ['#79bf46', '#5f9b2e'],
+    hills: ['#84b94d', '#6e9f43'],
+    cloudColor: 'rgba(255,255,255,0.85)',
+    starAlpha: 0.28,
+    decor: 'grass',
+  },
+  {
+    name: 'DESERT',
+    sky: ['#85c7ff', '#ffd699', '#ffb15d', '#e97942'],
+    ground: '#d8c26a',
+    turf: ['#c7af54', '#b18931'],
+    hills: ['#d9bb68', '#bb9150'],
+    cloudColor: 'rgba(255,244,224,0.72)',
+    starAlpha: 0.18,
+    decor: 'cactus',
+  },
+  {
+    name: 'SEA',
+    sky: ['#4fc4ff', '#8cf1ff', '#9ce7de', '#58b8d1'],
+    ground: '#7bcf8d',
+    turf: ['#4ec7b5', '#2d9b92'],
+    hills: ['#64c7b0', '#3e9d8b'],
+    cloudColor: 'rgba(255,255,255,0.8)',
+    starAlpha: 0.16,
+    decor: 'wave',
+  },
+  {
+    name: 'MOUNTAINS',
+    sky: ['#7eb8ff', '#c7e3ff', '#e8d8ff', '#a8a1e0'],
+    ground: '#7caf58',
+    turf: ['#688f46', '#486a33'],
+    hills: ['#7c8db0', '#55627f'],
+    cloudColor: 'rgba(255,255,255,0.8)',
+    starAlpha: 0.34,
+    decor: 'pine',
+  },
+];
 const AVATAR_PRESETS = {
   manon: {
     name: 'MANON',
@@ -129,6 +171,29 @@ function readMinecraftAvatar(playerType) {
   const defaults = MINECRAFT_AVATAR_DEFAULTS[playerType] || {};
   const saved = safeJsonParse(window.localStorage?.getItem?.(`minecraft_avatar_${playerType}`));
   return { ...defaults, ...(saved && typeof saved === 'object' ? saved : {}) };
+}
+
+function angryBlobsProfileKey(playerType) {
+  return `angry_blobs_profile_${playerType}`;
+}
+
+function readAngryBlobsProfile(playerType) {
+  const base = {
+    totalPoints: 0,
+    totalRoundsWon: 0,
+    matchesPlayed: 0,
+    lastWorld: 'MEADOW',
+  };
+  const saved = safeJsonParse(window.localStorage?.getItem?.(angryBlobsProfileKey(playerType)));
+  return { ...base, ...(saved && typeof saved === 'object' ? saved : {}) };
+}
+
+function writeAngryBlobsProfile(playerType, patch) {
+  const next = { ...readAngryBlobsProfile(playerType), ...patch };
+  try {
+    window.localStorage?.setItem?.(angryBlobsProfileKey(playerType), JSON.stringify(next));
+  } catch {}
+  return next;
 }
 
 function blobAvatarFromMinecraft(playerType) {
@@ -304,6 +369,10 @@ class Game {
     this.round = 1;
     this.roundWins = [0, 0];
     this.points = [0, 0];
+    this.savedProfiles = {
+      manon: readAngryBlobsProfile('manon'),
+      margot: readAngryBlobsProfile('margot'),
+    };
     this.currentShot = null;
     this.lastShotToast = '';
     this.aimStartedAt = performance.now();
@@ -344,6 +413,7 @@ class Game {
     this.pendingHits = new Map();
     this.shake = 0;
     this.freezeWorld = true;
+    this.theme = WORLD_THEMES[(this.round - 1) % WORLD_THEMES.length];
     this.clouds = [];
     this.hills = [];
     this.stars = [];
@@ -362,6 +432,7 @@ class Game {
 
   generateBackdrop() {
     const r = mulberry32(this.seed ^ 0x51f15e);
+    const theme = this.theme;
     for (let i = 0; i < 7; i++) {
       this.clouds.push({ x: r() * WORLD_W, y: 70 + r() * 210, w: 110 + r() * 120, drift: r() * 0.08 + 0.02 });
     }
@@ -371,7 +442,7 @@ class Game {
         y: GROUND_Y - 80 - r() * 140,
         w: 330 + r() * 180,
         h: 140 + r() * 120,
-        color: i % 2 ? '#84b94d' : '#6e9f43',
+        color: i % 2 ? theme.hills[0] : theme.hills[1],
       });
     }
     for (let i = 0; i < 18; i++) {
@@ -524,6 +595,17 @@ class Game {
     return this.avatarPreset(this.controllerAvatarKey(side)).name;
   }
 
+  localProfileKey() {
+    if (this.isSolo()) return 'manon';
+    return this.side === 0 ? 'manon' : 'margot';
+  }
+
+  updatePersistentProfile(playerType, patch) {
+    const next = writeAngryBlobsProfile(playerType, patch);
+    this.savedProfiles[playerType] = next;
+    return next;
+  }
+
   localWon(winnerSide) {
     return this.isCoop() ? winnerSide === 0 : winnerSide === this.side;
   }
@@ -618,6 +700,22 @@ class Game {
     const total = shot.points + bonus;
     if (total <= 0) return '';
     this.points[shot.side] += total;
+    if (shot.side === 0) {
+      if (this.isCoop()) {
+        for (const playerType of ['manon', 'margot']) {
+          this.updatePersistentProfile(playerType, {
+            totalPoints: this.savedProfiles[playerType].totalPoints + total,
+            lastWorld: this.theme.name,
+          });
+        }
+      } else {
+        const playerType = this.localProfileKey();
+        this.updatePersistentProfile(playerType, {
+          totalPoints: this.savedProfiles[playerType].totalPoints + total,
+          lastWorld: this.theme.name,
+        });
+      }
+    }
     const flair = this.describeShotPerformance(shot, total);
     return flair ? `${flair} • +${total}` : `+${total} PTS`;
   }
@@ -967,6 +1065,39 @@ class Game {
     if (this.pigsAlive[0] === 0 || this.pigsAlive[1] === 0) {
       const winner = this.pigsAlive[0] > 0 ? 0 : 1;
       this.roundWins[winner] += 1;
+      if (winner === 0) {
+        if (this.isCoop()) {
+          for (const playerType of ['manon', 'margot']) {
+            this.updatePersistentProfile(playerType, {
+              totalRoundsWon: this.savedProfiles[playerType].totalRoundsWon + 1,
+              matchesPlayed: this.savedProfiles[playerType].matchesPlayed + 1,
+              lastWorld: this.theme.name,
+            });
+          }
+        } else {
+          const playerType = this.localProfileKey();
+          this.updatePersistentProfile(playerType, {
+            totalRoundsWon: this.savedProfiles[playerType].totalRoundsWon + 1,
+            matchesPlayed: this.savedProfiles[playerType].matchesPlayed + 1,
+            lastWorld: this.theme.name,
+          });
+        }
+      } else if (this.isSolo() || this.isCoop()) {
+        if (this.isCoop()) {
+          for (const playerType of ['manon', 'margot']) {
+            this.updatePersistentProfile(playerType, {
+              matchesPlayed: this.savedProfiles[playerType].matchesPlayed + 1,
+              lastWorld: this.theme.name,
+            });
+          }
+        } else {
+          const playerType = this.localProfileKey();
+          this.updatePersistentProfile(playerType, {
+            matchesPlayed: this.savedProfiles[playerType].matchesPlayed + 1,
+            lastWorld: this.theme.name,
+          });
+        }
+      }
       this.phase = 'roundOver';
       this.roundResetAt = performance.now() + ROUND_RESET_MS;
       const winnerLabel = this.localWon(winner) ? 'YOU' : this.playerName(winner);
@@ -998,7 +1129,7 @@ class Game {
     this.startingTurn = 1 - this.startingTurn;
     if (this.isCoop()) this.startingController = 1 - this.startingController;
     this.resetRoundState(this.baseSeed + this.round * 977);
-    this.setToast(`ROUND ${this.round}`, 1200);
+    this.setToast(`ROUND ${this.round} • ${this.theme.name}`, 1400);
   }
 
   receive(msg) {
@@ -1022,20 +1153,20 @@ class Game {
     }
 
     const sky = ctx.createLinearGradient(0, 0, 0, ch);
-    sky.addColorStop(0, '#6bc7ff');
-    sky.addColorStop(0.48, '#9ee7ff');
-    sky.addColorStop(0.7, '#ffd77d');
-    sky.addColorStop(1, '#ff9966');
+    sky.addColorStop(0, this.theme.sky[0]);
+    sky.addColorStop(0.42, this.theme.sky[1]);
+    sky.addColorStop(0.7, this.theme.sky[2]);
+    sky.addColorStop(1, this.theme.sky[3]);
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, cw, ch);
 
     this.drawBackdrop();
 
-    ctx.fillStyle = '#90cf4f';
+    ctx.fillStyle = this.theme.ground;
     ctx.fillRect(0, this.w2cy(GROUND_Y), cw, ch);
     const turf = ctx.createLinearGradient(0, this.w2cy(GROUND_Y), 0, ch);
-    turf.addColorStop(0, '#79bf46');
-    turf.addColorStop(1, '#5f9b2e');
+    turf.addColorStop(0, this.theme.turf[0]);
+    turf.addColorStop(1, this.theme.turf[1]);
     ctx.fillStyle = turf;
     ctx.fillRect(0, this.w2cy(GROUND_Y), cw, this.s(38));
 
@@ -1071,10 +1202,10 @@ class Game {
   drawBackdrop() {
     const ctx = this.ctx;
     const time = performance.now() * 0.00003;
+    const theme = this.theme;
 
-    ctx.fillStyle = 'rgba(255,255,255,0.28)';
     for (const star of this.stars) {
-      const alpha = 0.3 + 0.2 * Math.sin(time * 30 + star.x);
+      const alpha = theme.starAlpha + 0.14 * Math.sin(time * 30 + star.x);
       ctx.fillStyle = `rgba(255,255,255,${alpha})`;
       ctx.beginPath();
       ctx.arc(this.w2cx(star.x), this.w2cy(star.y), this.s(star.size), 0, Math.PI * 2);
@@ -1095,7 +1226,7 @@ class Game {
       const cx = this.w2cx(x);
       const cy = this.w2cy(y);
       const s = this.s(c.w * 0.24);
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fillStyle = theme.cloudColor;
       ctx.beginPath();
       ctx.arc(cx, cy, s, 0, Math.PI * 2);
       ctx.arc(cx + s * 0.9, cy - s * 0.3, s * 0.9, 0, Math.PI * 2);
@@ -1108,15 +1239,45 @@ class Game {
       const x = this.w2cx(d.x);
       const y = this.w2cy(d.y);
       const size = this.s(d.size);
-      ctx.fillStyle = '#4d8e2a';
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x - size * 0.35 * d.flip, y - size * 0.9);
-      ctx.lineTo(x + size * 0.12 * d.flip, y - size * 0.5);
-      ctx.lineTo(x + size * 0.4 * d.flip, y - size * 1.1);
-      ctx.lineTo(x + size * 0.15 * d.flip, y);
-      ctx.closePath();
-      ctx.fill();
+      if (theme.decor === 'cactus') {
+        ctx.fillStyle = '#4f8d41';
+        ctx.fillRect(x - size * 0.1, y - size, size * 0.2, size);
+        ctx.fillRect(x - size * 0.34 * d.flip, y - size * 0.72, size * 0.16, size * 0.42);
+        ctx.fillRect(x + size * 0.18 * d.flip, y - size * 0.52, size * 0.16, size * 0.34);
+      } else if (theme.decor === 'wave') {
+        ctx.strokeStyle = '#e8fff8';
+        ctx.lineWidth = this.s(3);
+        ctx.beginPath();
+        ctx.moveTo(x - size * 0.55, y - size * 0.15);
+        ctx.quadraticCurveTo(x - size * 0.2, y - size * 0.58, x + size * 0.05, y - size * 0.15);
+        ctx.quadraticCurveTo(x + size * 0.28, y + size * 0.12, x + size * 0.55, y - size * 0.25);
+        ctx.stroke();
+      } else if (theme.decor === 'pine') {
+        ctx.fillStyle = '#355b3e';
+        ctx.fillRect(x - size * 0.07, y - size * 0.25, size * 0.14, size * 0.25);
+        ctx.beginPath();
+        ctx.moveTo(x, y - size * 1.04);
+        ctx.lineTo(x - size * 0.42, y - size * 0.45);
+        ctx.lineTo(x + size * 0.42, y - size * 0.45);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x, y - size * 0.78);
+        ctx.lineTo(x - size * 0.34, y - size * 0.28);
+        ctx.lineTo(x + size * 0.34, y - size * 0.28);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillStyle = '#4d8e2a';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - size * 0.35 * d.flip, y - size * 0.9);
+        ctx.lineTo(x + size * 0.12 * d.flip, y - size * 0.5);
+        ctx.lineTo(x + size * 0.4 * d.flip, y - size * 1.1);
+        ctx.lineTo(x + size * 0.15 * d.flip, y);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
   }
 
