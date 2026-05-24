@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Tank Duel</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      --sky-top: #2a1a4a;
+      --sky-bot: #ff8fb1;
+      --ground: #4d2a5a;
+      --grass: #b65fb6;
+      --p1: #ff5bdc;
+      --p2: #5be5ff;
+      --ink: #f8f0ff;
+      --panel: rgba(20, 10, 35, 0.78);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: var(--sky-top); color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      user-select: none; -webkit-user-select: none;
+      touch-action: none;
+    }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    .overlay {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 18px; padding: 24px;
+      background: linear-gradient(180deg, var(--sky-top) 0%, #5a2a6a 100%);
+      z-index: 50;
+    }
+    .overlay.hidden { display: none; }
+    h1 {
+      font-size: clamp(2rem, 7vw, 3.5rem);
+      letter-spacing: 0.06em;
+      text-shadow: 0 2px 0 #000, 0 0 22px rgba(255, 91, 220, 0.6);
+    }
+    h1 .pink { color: var(--p1); }
+    h1 .cyan { color: var(--p2); }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+    button, input {
+      font: inherit; font-size: 1.1rem;
+      background: var(--panel); color: var(--ink);
+      border: 2px solid var(--p1);
+      border-radius: 14px;
+      padding: 14px 22px;
+      min-width: 140px; min-height: 56px;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    button.cyan { border-color: var(--p2); }
+    button:active { transform: scale(0.97); background: rgba(255, 91, 220, 0.3); }
+    input {
+      letter-spacing: 0.3em; text-align: center; text-transform: uppercase;
+      min-width: 180px;
+    }
+    .code {
+      font-size: clamp(2rem, 9vw, 4rem);
+      letter-spacing: 0.4em;
+      padding: 14px 22px;
+      border: 3px dashed var(--p2);
+      border-radius: 18px;
+      background: var(--panel);
+    }
+    .hint { opacity: 0.78; font-size: 0.95rem; max-width: 30ch; text-align: center; }
+    #hud {
+      position: fixed; top: 0; left: 0; right: 0;
+      padding: 12px 16px;
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .hp {
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 8px 14px;
+      min-width: 130px;
+      border: 2px solid transparent;
+    }
+    .hp.p1 { border-color: var(--p1); }
+    .hp.p2 { border-color: var(--p2); }
+    .hp.turn { box-shadow: 0 0 20px currentColor; }
+    .hp .name { font-weight: 700; font-size: 0.9rem; letter-spacing: 0.1em; }
+    .hp .bar { height: 10px; background: rgba(255,255,255,0.18); border-radius: 6px; margin-top: 4px; overflow: hidden; }
+    .hp .bar > div { height: 100%; transition: width 200ms ease; }
+    .hp.p1 .bar > div { background: var(--p1); }
+    .hp.p2 .bar > div { background: var(--p2); }
+    #turn-banner {
+      font-weight: 700;
+      font-size: 1rem;
+      text-align: center;
+      background: var(--panel);
+      padding: 8px 14px;
+      border-radius: 10px;
+    }
+    #fire-btn {
+      position: fixed; right: 22px; bottom: 26px;
+      width: 110px; height: 110px; border-radius: 50%;
+      background: linear-gradient(160deg, #ff5bdc 0%, #c93cff 100%);
+      border: 4px solid #fff;
+      color: #fff; font-weight: 800; font-size: 1.4rem; letter-spacing: 0.1em;
+      box-shadow: 0 6px 22px rgba(0,0,0,0.45);
+      z-index: 20;
+    }
+    #fire-btn:disabled { opacity: 0.35; }
+    #power-meter {
+      position: fixed; left: 22px; bottom: 26px;
+      width: 70px; height: 220px;
+      background: var(--panel);
+      border: 2px solid #fff;
+      border-radius: 14px;
+      overflow: hidden;
+      z-index: 20;
+    }
+    #power-meter > div {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(0deg, #ff5bdc, #ffd45b);
+      transition: height 80ms;
+    }
+    #power-meter > span {
+      position: absolute; top: 6px; left: 0; right: 0;
+      text-align: center; font-size: 0.75rem; letter-spacing: 0.15em; font-weight: 700;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+    }
+    #wind {
+      position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+      background: var(--panel); padding: 6px 14px; border-radius: 10px;
+      font-size: 0.85rem; letter-spacing: 0.1em; z-index: 10;
+    }
+    .toast {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      padding: 24px 32px; border-radius: 18px;
+      background: var(--panel); border: 3px solid var(--p1);
+      font-size: 1.4rem; font-weight: 700; text-align: center;
+      z-index: 40;
+      opacity: 0; pointer-events: none; transition: opacity 240ms;
+    }
+    .toast.show { opacity: 1; }
+    .footer-hint {
+      position: fixed; bottom: 6px; left: 50%; transform: translateX(-50%);
+      font-size: 0.72rem; opacity: 0.5; z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="hidden">
+    <div class="hp p1" id="hp-p1">
+      <div class="name">PINK</div>
+      <div class="bar"><div style="width:100%"></div></div>
+    </div>
+    <div id="turn-banner">…</div>
+    <div class="hp p2" id="hp-p2">
+      <div class="name">CYAN</div>
+      <div class="bar"><div style="width:100%"></div></div>
+    </div>
+  </div>
+
+  <div id="wind" class="hidden"></div>
+  <div id="power-meter" class="hidden"><div style="height:50%"></div><span>POWER</span></div>
+  <button id="fire-btn" class="hidden">FIRE</button>
+  <div id="toast" class="toast"></div>
+  <div class="footer-hint">drag from your tank to aim · further = more power · tap FIRE</div>
+
+  <div id="lobby" class="overlay">
+    <h1><span class="pink">TANK</span> <span class="cyan">DUEL</span></h1>
+    <p class="hint">Two iPads. One game. Take turns blowing each other up. ♥</p>
+    <div class="row">
+      <button id="host-btn">HOST GAME</button>
+      <button id="join-btn" class="cyan">JOIN GAME</button>
+    </div>
+    <p id="lobby-status" class="hint"></p>
+  </div>
+
+  <div id="host-wait" class="overlay hidden">
+    <h1>Room code</h1>
+    <p class="hint">Tell your sister to tap JOIN and type this code:</p>
+    <div id="room-code" class="code">----</div>
+    <p class="hint" id="host-status">Waiting for her to join…</p>
+    <button id="host-back">Back</button>
+  </div>
+
+  <div id="join-form" class="overlay hidden">
+    <h1>Join a game</h1>
+    <p class="hint">Type the 4-letter code your sister tells you:</p>
+    <input id="join-code" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="CODE">
+    <div class="row">
+      <button id="join-go" class="cyan">JOIN</button>
+      <button id="join-back">Back</button>
+    </div>
+    <p class="hint" id="join-status"></p>
+  </div>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script type="module" src="./game.js"></script>
+</body>
+</html>
