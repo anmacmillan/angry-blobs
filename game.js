@@ -109,7 +109,11 @@ class Game {
     const speed = SHOT_SPEED * Math.max(0.15, Math.min(1, this.aim.power));
     const vx = Math.cos(this.aim.angle) * speed;
     const vy = Math.sin(this.aim.angle) * speed;
-    const payload = { type: 'fire', side: this.side, x: tank.x, y: tank.y - TANK_H + 4, vx, vy, wind: this.wind };
+    // Spawn at barrel tip so the projectile clears the firer's tank collision radius.
+    const muzzleOffset = TANK_W * 0.8;
+    const spawnX = tank.x + Math.cos(this.aim.angle) * muzzleOffset;
+    const spawnY = (tank.y - TANK_H) + Math.sin(this.aim.angle) * muzzleOffset;
+    const payload = { type: 'fire', side: this.side, x: spawnX, y: spawnY, vx, vy, wind: this.wind };
     this.send(payload);
     this.startProjectile(payload);
   }
